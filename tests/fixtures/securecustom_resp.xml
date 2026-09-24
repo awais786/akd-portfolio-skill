@@ -1,0 +1,1 @@
+<?xml version='1.0' encoding='UTF-8'?><S:Envelope xmlns:S="http://schemas.xmlsoap.org/soap/envelope/"><S:Body><ns2:SecurecustomAuthenticationResponse xmlns:ns2="http://login/"><return>true|TOK-SESSION|Trader|true|0|Dear Client|KSE</return></ns2:SecurecustomAuthenticationResponse></S:Body></S:Envelope>

@@ -1,0 +1,234 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AKD App</title>
+<style>
+  :root {
+    --bg:#f6f7f9; --panel:#fff; --ink:#1a1d23; --muted:#6b7280; --edge:#e2e5ea;
+    --accent:#2563eb; --up:#15803d; --down:#b91c1c; --warn:#b45309;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#0e1116; --panel:#171b22; --ink:#e6e8ec; --muted:#8b93a1; --edge:#2a303a;
+            --accent:#5b9bff; --up:#4ade80; --down:#f87171; --warn:#fbbf24; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink);
+         font:14px/1.5 system-ui,-apple-system,Segoe UI,sans-serif; }
+  main { max-width:960px; margin:0 auto; padding:20px 16px 48px; }
+  h1 { font-size:18px; margin:0; }
+  header { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; flex-wrap:wrap; }
+  .panel { background:var(--panel); border:1px solid var(--edge); border-radius:8px; padding:16px; margin-bottom:16px; }
+  .pill { display:inline-flex; align-items:center; gap:6px; font-size:12px; }
+  .dot { width:8px; height:8px; border-radius:50%; background:var(--warn); }
+  .dot.on { background:var(--up); }
+  label { display:block; font-size:12px; color:var(--muted); margin:10px 0 4px; }
+  input, textarea { width:100%; padding:8px; border:1px solid var(--edge); border-radius:6px;
+                    background:var(--bg); color:var(--ink); font:inherit; font-family:ui-monospace,Menlo,monospace; }
+  button { padding:8px 14px; border:0; border-radius:6px; background:var(--accent); color:#fff; font:inherit; cursor:pointer; }
+  button.ghost { background:transparent; color:var(--muted); border:1px solid var(--edge); }
+  button:disabled { opacity:.45; cursor:default; }
+  nav { display:flex; gap:4px; margin-bottom:12px; border-bottom:1px solid var(--edge); }
+  nav button { background:transparent; color:var(--muted); border-radius:6px 6px 0 0; }
+  nav button.active { color:var(--ink); border-bottom:2px solid var(--accent); }
+  table { width:100%; border-collapse:collapse; }
+  th, td { text-align:right; padding:6px 8px; border-bottom:1px solid var(--edge); }
+  th { color:var(--muted); font-weight:500; font-size:12px; }
+  th:first-child, td:first-child { text-align:left; }
+  .mono { font-family:ui-monospace,Menlo,monospace; }
+  .muted { color:var(--muted); font-size:12px; }
+  .err { color:var(--down); font-size:12px; margin-top:8px; }
+  .flags { margin:0 0 10px; display:flex; gap:6px; flex-wrap:wrap; }
+  .flag { font-size:11px; padding:2px 8px; border-radius:99px; border:1px solid var(--warn); color:var(--warn); }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:10px; }
+  .card { border:1px solid var(--edge); border-radius:8px; padding:10px 12px; }
+  .card b { display:block; font-size:18px; font-family:ui-monospace,Menlo,monospace; }
+  .buy { color:var(--up); } .sell { color:var(--down); }
+  .table-wrap { overflow-x:auto; }
+  [hidden] { display:none !important; }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>AKD App</h1>
+    <span class="pill"><span id="dot" class="dot"></span><span id="conn">Not connected</span></span>
+  </header>
+
+  <section id="connect" class="panel">
+    <form id="connect-form" autocomplete="off">
+      <div class="muted">Log in to sync holdings, cash and orders. The password opens the session, is kept
+        only encrypted on this machine, and is never shown again.</div>
+      <label for="account">Account</label>
+      <input id="account" placeholder="e.g. COAF00000" required>
+      <label for="password">Full password (not the 4 challenge characters)</label>
+      <input id="password" type="password" required>
+      <p style="margin:12px 0 0"><button id="connect-btn" type="submit">Connect</button></p>
+      <div id="connect-err" class="err" role="alert"></div>
+    </form>
+    <div id="connected-box" hidden>
+      <div>Account <span id="acct" class="mono"></span> · last update <span id="asof" class="mono muted"></span></div>
+      <p style="margin:12px 0 0"><button id="disconnect" class="ghost">Disconnect</button></p>
+    </div>
+  </section>
+
+  <nav id="tabs">
+    <button data-tab="holdings" class="active">Holdings</button>
+    <button data-tab="cash">Cash</button>
+    <button data-tab="orders">Orders</button>
+    <button data-tab="import">Import</button>
+  </nav>
+
+  <section id="tab-holdings" class="panel"></section>
+  <section id="tab-cash" class="panel" hidden></section>
+  <section id="tab-orders" class="panel" hidden></section>
+  <section id="tab-import" class="panel" hidden>
+    <div class="muted">Paste a TradeCast export to preview how it parses. Nothing is stored.</div>
+    <label for="imp-kind">Kind</label>
+    <select id="imp-kind" style="padding:8px;background:var(--bg);color:var(--ink);border:1px solid var(--edge);border-radius:6px">
+      <option value="positions">Positions / Portfolio Watch (CSV)</option>
+      <option value="orders">Order history (raw GetOrderHistory or CSV)</option>
+    </select>
+    <label for="imp-text">Content</label>
+    <textarea id="imp-text" rows="8"></textarea>
+    <p style="margin:12px 0 0"><button id="imp-go">Parse</button></p>
+    <div id="imp-out" style="margin-top:12px"></div>
+  </section>
+</main>
+
+<script>
+// Everything rendered from API data goes through textContent / createTextNode: never innerHTML.
+const $ = (id) => document.getElementById(id);
+const el = (tag, props = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) k === "class" ? (e.className = v) : e.setAttribute(k, v);
+  for (const kid of kids.flat()) e.append(kid instanceof Node ? kid : document.createTextNode(kid ?? "—"));
+  return e;
+};
+const num = (v, d = 2) => v == null ? "—" : Number(v).toLocaleString(undefined, { maximumFractionDigits: d });
+const when = (s) => s ? new Date(s).toLocaleString() : "—";
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  const body = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(body.detail || `HTTP ${r.status}`);
+  return body;
+}
+function flagsRow(flags) {
+  return el("div", { class: "flags" }, (flags || []).map((f) => el("span", { class: "flag" }, f)));
+}
+function table(cols, rows) {
+  const t = el("table");
+  t.append(el("thead", {}, el("tr", {}, cols.map((c) => el("th", {}, c.label)))));
+  t.append(el("tbody", {}, rows.map((r) => el("tr", {}, cols.map((c) => el("td", { class: c.cls ? c.cls(r) : "" }, c.get(r)))))));
+  return el("div", { class: "table-wrap" }, t);
+}
+function nothing(section, msg) { section.replaceChildren(el("div", { class: "muted" }, msg)); }
+
+async function renderHoldings() {
+  const s = $("tab-holdings"), { data, flags } = await api("/api/akd/holdings");
+  if (data.positions == null) return nothing(s, "No holdings captured yet. Connect to AKD to sync.");
+  const t = data.totals;
+  s.replaceChildren(
+    flagsRow(flags),
+    t ? el("div", { class: "cards" },
+      el("div", { class: "card" }, "Positions", el("b", {}, num(t.position_count, 0))),
+      el("div", { class: "card" }, "Total cost value (PKR)", el("b", {}, num(t.total_cost_value)))) : "",
+    el("p", { class: "muted" }, `Holdings last changed ${when(data.as_of)} · confirmed by AKD ${when(data.last_confirmed_at)}`),
+    data.positions.length ? table([
+      { label: "Symbol", get: (r) => r.symbol },
+      { label: "Quantity", get: (r) => num(r.quantity, 0) },
+      { label: "Avg cost", get: (r) => num(r.avg_cost) },
+      { label: "Cost value", get: (r) => num(r.cost_value) },
+    ], data.positions) : el("div", { class: "muted" }, "AKD reports an empty book."),
+  );
+}
+const CASH_LABELS = { cash_pkr: "Cash", exposure_used_pkr: "Exposure used", share_worth_pkr: "Share worth",
+                      equity_pkr: "Equity", free_cash_pkr: "Free cash (buying power)", pl_pkr: "Profit / loss" };
+async function renderCash() {
+  const s = $("tab-cash"), { data, flags } = await api("/api/akd/cash");
+  if (data.cash == null) return nothing(s, "No cash data captured yet. Connect to AKD to sync.");
+  s.replaceChildren(
+    flagsRow(flags),
+    el("div", { class: "cards" }, Object.entries(CASH_LABELS).map(([k, label]) =>
+      el("div", { class: "card" }, label, el("b", {}, num(data.cash[k]))))),
+    el("p", { class: "muted" }, `Last changed ${when(data.as_of)} · confirmed by AKD ${when(data.last_confirmed_at)}`),
+  );
+}
+async function renderOrders() {
+  const s = $("tab-orders"), { data, flags } = await api("/api/akd/orders");
+  if (data.orders == null) return nothing(s, "No order history captured yet. Connect to AKD to sync.");
+  s.replaceChildren(
+    flagsRow(flags),
+    el("p", { class: "muted" }, "Provisional: the order-history decoder has not been checked against the broker's own record."),
+    data.orders.length ? table([
+      { label: "Date", get: (r) => (r.placed_at || "").slice(0, 10) },
+      { label: "Symbol", get: (r) => r.symbol },
+      { label: "Side", get: (r) => r.side, cls: (r) => r.side === "BUY" ? "buy" : "sell" },
+      { label: "Qty", get: (r) => num(r.quantity, 0) },
+      { label: "Price", get: (r) => num(r.price) },
+    ], data.orders) : el("div", { class: "muted" }, "AKD reports no fills."),
+  );
+}
+
+async function renderStatus() {
+  const { data } = await api("/api/akd/status");
+  const on = !!data.broker_connected;
+  $("dot").className = "dot" + (on ? " on" : "");
+  $("conn").textContent = on ? "Connected" : (data.daemon?.state === "running" ? "Connecting…" : "Not connected");
+  const running = data.daemon?.state === "running";
+  $("connect-form").hidden = running || on;
+  $("connected-box").hidden = !(running || on);
+  $("acct").textContent = data.account_ref || "";
+  $("asof").textContent = when(data.as_of);
+  if (!on && data.daemon?.error && !$("connect-err").textContent) $("connect-err").textContent = "Daemon: " + data.daemon.error;
+}
+
+let current = "holdings";
+const renderers = { holdings: renderHoldings, cash: renderCash, orders: renderOrders };
+async function refresh() {
+  try { await renderStatus(); if (renderers[current]) await renderers[current](); } catch (e) { /* server restarting */ }
+}
+$("tabs").addEventListener("click", (ev) => {
+  const t = ev.target.dataset?.tab; if (!t) return;
+  current = t;
+  for (const b of document.querySelectorAll("#tabs button")) b.classList.toggle("active", b.dataset.tab === t);
+  for (const id of ["holdings", "cash", "orders", "import"]) $("tab-" + id).hidden = id !== t;
+  refresh();
+});
+$("connect-form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const btn = $("connect-btn"), err = $("connect-err");
+  btn.disabled = true; btn.textContent = "Connecting…"; err.textContent = "";
+  try {
+    await api("/api/akd/connect", { method: "POST", headers: { "content-type": "application/json" },
+      body: JSON.stringify({ user_id: $("account").value.trim(), password: $("password").value }) });
+    $("password").value = "";
+    for (let i = 0; i < 12; i++) { await refresh(); if ($("dot").classList.contains("on")) break; await new Promise((r) => setTimeout(r, 2000)); }
+  } catch (e) { err.textContent = e.message; }
+  finally { btn.disabled = false; btn.textContent = "Connect"; }
+});
+$("disconnect").addEventListener("click", async () => { await api("/api/akd/disconnect", { method: "POST" }); refresh(); });
+$("imp-go").addEventListener("click", async () => {
+  const out = $("imp-out"); out.replaceChildren();
+  try {
+    const kind = $("imp-kind").value;
+    const { data, flags } = await api("/api/import/" + kind, { method: "POST",
+      headers: { "content-type": "application/json" }, body: JSON.stringify({ content: $("imp-text").value }) });
+    out.append(flagsRow(flags));
+    if (kind === "positions") {
+      (data.warnings || []).forEach((w) => out.append(el("div", { class: "err" }, w)));
+      if (data.positions.length) out.append(table([
+        { label: "Symbol", get: (r) => r.symbol }, { label: "Quantity", get: (r) => num(r.quantity, 0) },
+        { label: "Avg cost", get: (r) => num(r.avg_cost) }], data.positions));
+    } else if (data.fills.length) out.append(table([
+      { label: "Date", get: (r) => r.traded_on }, { label: "Symbol", get: (r) => r.symbol },
+      { label: "Side", get: (r) => r.side, cls: (r) => r.side === "BUY" ? "buy" : "sell" },
+      { label: "Qty", get: (r) => num(r.quantity, 0) }, { label: "Price", get: (r) => num(r.price) }], data.fills));
+  } catch (e) { out.append(el("div", { class: "err" }, e.message)); }
+});
+refresh(); setInterval(refresh, 15000);
+</script>
+</body>
+</html>
