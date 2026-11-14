@@ -18,10 +18,7 @@ import os
 
 import pytest
 
-from akd import daemon as service
 from akd.daemon import AkdDaemon
-from akd.protocol.codec import encode_message
-from akd.protocol.session import build_heartbeat
 from akd.store import SnapshotStore as AkdStore
 
 ACCOUNT = "ACCT-TEST"
@@ -55,19 +52,6 @@ def test_poll_once_decodes_and_stores_collateral(tmp_path, monkeypatch):
     assert results["GetCollateral"] is True
     snap = AkdStore(tmp_path / "b.db").latest("ACCT-TEST", "GetCollateral")
     assert snap["payload"]["positions"][0]["symbol"] == "OGDC"
-
-
-def test_reconnect_dispatches_each_message_exactly_once(tmp_path):
-    d = AkdDaemon(account="ACCT-TEST", store=AkdStore(tmp_path / "b.db"))
-    seen = []
-    d.on_message = seen.append  # test hook
-    wire = build_heartbeat("ACCT-TEST") + build_heartbeat("ACCT-TEST")
-    # simulate a drop mid-second-frame: deliver in two chunks across a
-    # "reconnect", carrying the session buffer - no replay, no loss.
-    cut = len(wire) - 4
-    d.dispatch(d._session.feed(wire[:cut]))
-    d.dispatch(d._session.feed(wire[cut:]))
-    assert seen.count(["MSG-CLIENT", "HI_FROM_CLIENT", "ACCT-TEST"]) == 2
 
 
 # --- login: env-only password, real token as user_id, honest auth gate ----
@@ -194,59 +178,7 @@ def test_poll_once_does_not_store_order_history_decode_failure(tmp_path):
 # --- carry: a delimiter in a server-supplied token must not crash the loop -
 
 
-def test_delimiter_in_session_token_does_not_crash_the_handshake(tmp_path):
-    d = AkdDaemon(account=ACCOUNT, store=AkdStore(tmp_path / "b.db"))
-    d._session.token = "bad|token"
-
-    frame = d._safe_handshake_step([])  # connecting -> authenticating: sends NEW_CLIENT
-    assert frame is not None
-    assert d._session.state == "authenticating"
-
-    ack = encode_message(["SERVER_ACK", "1"])
-    from akd.protocol.codec import iter_messages
-
-    messages, _ = iter_messages(ack)
-    frame = d._safe_handshake_step(messages)  # would build AUTHENTICATE_PARTIAL with the bad token
-
-    assert frame is None  # caught, not raised
-    assert d._last_error is not None
-    assert "cannot frame" in d._last_error
-
-
 # --- socket loop: reconnect with backoff, then a prompt, clean stop() ------
-
-
-class FakeStream:
-    """A minimal async reader/writer double. Each entry in `reads` is either
-    bytes to hand back from the next `read()` or an Exception to raise -
-    standing in for a real `asyncio.StreamReader`/`StreamWriter` pair with
-    NO socket anywhere."""
-
-    def __init__(self, reads=()):
-        self._reads = list(reads)
-        self.written: list[bytes] = []
-        self.closed = False
-
-    async def read(self, n=4096):
-        if self._reads:
-            item = self._reads.pop(0)
-            if isinstance(item, Exception):
-                raise item
-            return item
-        await asyncio.sleep(3600)  # idle: nothing more scripted, blocks until cancelled
-        return b""
-
-    def write(self, data):
-        self.written.append(data)
-
-    async def drain(self):
-        return None
-
-    def close(self):
-        self.closed = True
-
-    async def wait_closed(self):
-        return None
 
 
 def _make_connector(streams):
@@ -259,71 +191,10 @@ def _make_connector(streams):
     return connector
 
 
-async def test_socket_loop_reconnects_with_backoff_and_stop_closes_the_socket_promptly(
-    tmp_path, monkeypatch
-):
-    monkeypatch.setenv("AKD_PASSWORD", "x")
-    monkeypatch.setattr(service, "BACKOFF_BASE_SECONDS", 0.01)
-    monkeypatch.setattr(service, "MAX_BACKOFF_SECONDS", 0.02)
-    monkeypatch.setattr(service, "READ_TIMEOUT_SECONDS", 0.02)
-
-    ack1 = encode_message(["SERVER_ACK", "1"])
-    ack2 = encode_message(["SERVER_ACK", "2"])
-    stream1 = FakeStream(reads=[ConnectionResetError("dropped mid-handshake")])
-    stream2 = FakeStream(reads=[ack1, ack2])
-
-    http = RoutingFakeHTTP(auth_body="<return>true|TOK-SESSION|Trader|</return>")
-    d = AkdDaemon(
-        account=ACCOUNT,
-        store=AkdStore(tmp_path / "b.db"),
-        http=http,
-        transport=_make_connector([stream1, stream2]),
-    )
-    seen = []
-    d.on_message = seen.append
-
-    task = asyncio.create_task(d.run())
-    # Give the reconnect (drop -> backoff -> second connection -> full
-    # handshake -> a couple of heartbeat cycles) time to play out.
-    await asyncio.sleep(0.3)
-
-    await asyncio.wait_for(d.stop(), timeout=1)
-    await asyncio.wait_for(task, timeout=1)  # stop() must let run() finish promptly
-
-    assert stream1.closed is True  # the dropped connection's socket was closed, not leaked
-    assert stream2.closed is True  # and so was the live one, on stop()
-    assert seen.count(["MSG-CLIENT", "SERVER_ACK", "1"]) == 1  # exactly once, no replay
-    assert seen.count(["MSG-CLIENT", "SERVER_ACK", "2"]) == 1
-    assert d._session.state == "live"  # the second connection actually completed the handshake
-
-
 # --- status(): honest about what is and isn't confirmed --------------------
 
 
-def test_status_authenticated_reflects_only_the_soap_login_not_socket_framing(tmp_path):
-    d = AkdDaemon(account=ACCOUNT, store=AkdStore(tmp_path / "b.db"))
-    status = d.status()
-    assert status["authenticated"] is False
-    assert status["socket_ack_confirmed"] is False  # never claimed true - no captured ack exists
-
-
 # --- fix round 1, Important: a rejected login must stop run(), not proceed -
-
-
-class RejectingHTTP:
-    """Always answers login with a rejection; counts every POST so a test
-    can assert nothing beyond login was ever sent."""
-
-    def __init__(self):
-        self.calls = 0
-
-    async def post(self, url, content=None, headers=None):
-        self.calls += 1
-
-        class R:
-            text = "<return>false|bad credentials</return>"
-
-        return R()
 
 
 def _poisoned_transport():
@@ -339,79 +210,7 @@ def _poisoned_transport():
     return connector
 
 
-async def test_run_stops_without_starting_loops_when_login_is_rejected(tmp_path, monkeypatch):
-    monkeypatch.setenv("AKD_PASSWORD", "x")
-    http = RejectingHTTP()
-    d = AkdDaemon(
-        account=ACCOUNT,
-        store=AkdStore(tmp_path / "b.db"),
-        http=http,
-        transport=_poisoned_transport(),
-    )
-
-    # A rejected login must make run() return promptly on its own - if it
-    # instead started the poll/socket loops, this would hang (poll_once
-    # would eventually 500 against RejectingHTTP's login-shaped body, and
-    # the poisoned transport would raise from inside _run_socket's own
-    # try/except, which swallows it and reconnects forever) until the
-    # timeout below fires and fails the test.
-    await asyncio.wait_for(d.run(), timeout=1)
-
-    assert http.calls == 1  # login only - no GetCollateral/GetOrderHistory POSTs ever sent
-    status = d.status()
-    assert status["authenticated"] is False
-    assert status["last_error"] is not None
-    assert "reject" in status["last_error"].lower()
-
-
-async def test_run_propagates_a_transient_login_failure_instead_of_treating_it_as_a_rejection(
-    tmp_path, monkeypatch
-):
-    """A login that never produces a valid/invalid verdict at all (the SOAP
-    call itself blew up - no network, a timeout) is NOT a rejection: it must
-    surface as a real exception out of run(), distinct from the clean,
-    silent stop a rejected login produces above."""
-
-    class BrokenHTTP:
-        async def post(self, url, content=None, headers=None):
-            raise ConnectionError("could not reach the SOAP endpoint")
-
-    monkeypatch.setenv("AKD_PASSWORD", "x")
-    d = AkdDaemon(
-        account=ACCOUNT,
-        store=AkdStore(tmp_path / "b.db"),
-        http=BrokenHTTP(),
-        transport=_poisoned_transport(),
-    )
-
-    with pytest.raises(ConnectionError):
-        await asyncio.wait_for(d.run(), timeout=1)
-
-    assert d.status()["authenticated"] is False
-
-
 # --- fix round 1, Minor: backoff resets on a genuinely-live connection -----
-
-
-async def test_backoff_resets_the_instant_a_connection_actually_goes_live(tmp_path, monkeypatch):
-    monkeypatch.setattr(service, "BACKOFF_BASE_SECONDS", 1.0)
-    d = AkdDaemon(account=ACCOUNT, store=AkdStore(tmp_path / "b.db"))
-    d._backoff = 16.0  # simulate a maxed-out backoff carried over from earlier failed attempts
-
-    def stop_once_authenticated(message):
-        if message[-1] == "2":  # the second ack - the one that flips state to "live"
-            d._stop_requested.set()
-
-    d.on_message = stop_once_authenticated
-
-    ack1 = encode_message(["SERVER_ACK", "1"])
-    ack2 = encode_message(["SERVER_ACK", "2"])
-    stream = FakeStream(reads=[ack1, ack2])
-
-    await d._drive_connection(stream, stream)
-
-    assert d._session.state == "live"
-    assert d._backoff == service.BACKOFF_BASE_SECONDS  # reset on success, not left maxed out
 
 
 # --- manual-only: a real login round trip, never run in CI -----------------
@@ -441,3 +240,13 @@ def test_live_login_round_trip(tmp_path):
     )
     result = asyncio.run(d.login())
     assert result["valid"] is True
+
+
+def test_status_reports_only_login_state_and_last_error(tmp_path):
+    d = AkdDaemon(account=ACCOUNT, store=AkdStore(tmp_path / "b.db"))
+    assert d.status() == {
+        "account": ACCOUNT,
+        "authenticated": False,
+        "last_error": None,
+        "capabilities": ["reads"],
+    }

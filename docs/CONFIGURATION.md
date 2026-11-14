@@ -1,34 +1,16 @@
 # Configuration
 
-All via environment variables, read once at startup (`src/akd/config.py`). Nothing is required; defaults work.
+The `portfolio` command needs two environment variables. Export them in your shell; do not put the password in a file.
 
-| Variable | Default | Purpose |
+| Variable | Default | Meaning |
 |---|---|---|
-| `AKD_HOST` | `127.0.0.1` | Bind address. Anything non-loopback logs a warning: the app has **no login**. |
-| `AKD_PORT` | `8080` | HTTP port. |
-| `AKD_DATA_DIR` | `./data` | Directory for the database and encrypted credentials. Relative paths resolve against the working directory. |
-| `AKD_ACCOUNT_REF` | `local` | Key under which snapshots are stored. Only change to keep separate accounts in separate data dirs. |
-| `AKD_PASSWORD` | unset | Headless fallback password (CI / no browser). Used only if no password was set through the UI. |
-| `AKD_SOAP_URL` | `http://online.akdtrade.biz/TradeCastServicev428/LoginServerService` | AKD SOAP endpoint. |
-| `AKD_SOCKET_HOST` / `AKD_SOCKET_PORT` | `online.akdtrade.biz` / `8092` | Trade socket. Unused: the app never opens it. |
+| `AKD_USER_ID` | unset (required) | Your first AKD account, e.g. `COAF00000`. `AKD_USER_ID_1` also works (not both). |
+| `AKD_PASSWORD` | unset (required) | That account's full password. Held in memory for one run; never written, logged or printed. |
+| `AKD_USER_ID_2`, `AKD_PASSWORD_2`, `_3`, ... | unset | More accounts. Slots are read in numeric order, one login attempt each; a failing account does not stop the others. An account listed twice is logged into once. |
+| `AKD_SOAP_URL` | AKD's TradeCast SOAP endpoint | Change only if AKD moves it. |
+| `AKD_DATA_DIR` | `data` | Where a `SnapshotStore` would live. `portfolio` uses a throwaway temp directory instead. |
+| `AKD_ENV_FILE` | `.env` | A `.env` file to load. Real environment variables win over it. Set empty to disable. |
 
-Constants in code (not env): poll interval 5 s (`daemon.POLL_SECONDS`), live window 15 min and clock-skew tolerance 5 min (`config.py`), server code `03`.
+`.env` is optional and git-ignored; `.env.example` shows the format. **Never put `AKD_PASSWORD` in it.**
 
-## Files created in `AKD_DATA_DIR`
-
-| File | Contents | Sensitivity |
-|---|---|---|
-| `akd.db` (+ `-wal`, `-shm`) | your holdings, order history, cash figures | **Private financial data** |
-| `akd_creds.enc` | Fernet-encrypted `{user_id, password}` | **Secret**, together with the key |
-| `akd_creds.key` | the Fernet key (mode 0600) | **Secret** |
-
-Delete `akd_creds.enc` (or click **Disconnect**) to forget the login. Delete the whole directory to reset everything. The directory is git-ignored.
-
-## Running
-
-```bash
-uv run akd-app                                   # console script
-uv run python -m akd                             # same
-uv run uvicorn akd.api:app --port 8080 --reload  # dev
-AKD_PORT=9000 AKD_DATA_DIR=~/.akd uv run akd-app
-```
+Constants in `config.py` (not environment-tunable): `LIVE_WINDOW_MINUTES = 15`, `CLOCK_SKEW_TOLERANCE_MINUTES = 5`.

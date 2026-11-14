@@ -39,6 +39,14 @@ __all__ = [
 # test has none) and mirror the header's real, currently-observed column
 # positions - see decode_collateral's docstring for why a present-but-wrong
 # header fails closed instead of falling back to these.
+# Optional columns, found by header name only (never by position: a wrong column read as a price is
+# worse than a missing one). Absent header => None.
+_OPTIONAL_HEADERS = {
+    "market_price": "MTM",
+    "market_value": "MTM Amount",
+    "settled_pl": "SETTLED P/L",
+    "unsettled_pl": "UNSETTLED P/L",
+}
 _QTY_HEADER = "Quantity"
 _COST_HEADER = "Avg. BUY RATE"
 _DEFAULT_QTY_INDEX = 1
@@ -133,11 +141,13 @@ def decode_collateral(text: str, as_of: datetime) -> list[AkdPosition]:
             )
         qty_index = header_fields.index(_QTY_HEADER)
         cost_index = header_fields.index(_COST_HEADER)
+        optional = {k: header_fields.index(h) for k, h in _OPTIONAL_HEADERS.items() if h in header_fields}
         data_records = records[1:]
     else:
         # No header at all - decode on the documented default positions
         # rather than refuse a capture that (unusually) omits its header.
         qty_index, cost_index = _DEFAULT_QTY_INDEX, _DEFAULT_COST_INDEX
+        optional = {}
         data_records = records
 
     out: dict[str, AkdPosition] = {}
@@ -158,6 +168,7 @@ def decode_collateral(text: str, as_of: datetime) -> list[AkdPosition]:
             quantity=int(quantity),
             avg_cost=avg_cost,
             as_of=as_of,
+            **{k: (_to_float(cols[i]) if len(cols) > i else None) for k, i in optional.items()},
         )
     return list(out.values())
 
@@ -318,4 +329,9 @@ def decode_exposure(text: str) -> dict | None:
         "free_cash_pkr": g("Free Cash"), "pl_pkr": g("Profit/Loss"),
     }
     # A body that yielded no recognisable money field is not a valid snapshot.
-    return out if any(v is not None for v in out.values()) else None
+    if not any(v is not None for v in out.values()):
+        return None
+    # Keep EVERY numeric column of the summary line too (Pending, Outstanding Worth, Loan, ...), so
+    # nothing AKD sends is dropped just because we have no named slot for it.
+    out["fields"] = {k: v for k in keys if (v := g(k)) is not None}
+    return out

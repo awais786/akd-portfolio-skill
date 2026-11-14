@@ -1,21 +1,22 @@
-"""`python -m akd` / `akd-app`: run the server on AKD_HOST:AKD_PORT."""
+"""`python -m akd portfolio` / `akd-app portfolio`: one-shot headless portfolio fetch.
+
+Credentials come from AKD_USER_ID and AKD_PASSWORD in the environment. One JSON document on stdout.
+"""
 from __future__ import annotations
 
-import logging
+import os
+import sys
 
-import uvicorn
+from .portfolio import run_portfolio
 
-from . import config
+USAGE = "usage: python -m akd portfolio    (needs AKD_USER_ID and AKD_PASSWORD in the environment)"
 
 
 def main() -> None:
-    logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-    if config.HOST not in ("127.0.0.1", "localhost", "::1"):
-        logging.getLogger("akd").warning(
-            "binding to %s: this app has NO login and serves your brokerage data to anyone who can reach it",
-            config.HOST,
-        )
-    uvicorn.run("akd.api:app", host=config.HOST, port=config.PORT)
+    if len(sys.argv) > 1 and sys.argv[1] == "portfolio":
+        sys.exit(run_portfolio(os.environ, sys.stdout, sys.stderr))
+    print(USAGE, file=sys.stderr)
+    sys.exit(2)
 
 
 if __name__ == "__main__":

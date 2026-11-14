@@ -1,6 +1,4 @@
 # Runtime dependencies. Keep in sync with [project].dependencies in pyproject.toml.
-# Tested with: fastapi 0.141, uvicorn 0.53, httpx 0.28, cryptography 50 (Python 3.11 - 3.14).
-fastapi>=0.115,<1
-uvicorn>=0.30,<1
+# Tested with: httpx 0.28, cryptography 50 (Python 3.11 - 3.14).
 httpx>=0.27,<1
 cryptography>=42

@@ -58,8 +58,13 @@ def _hash(payload: dict) -> str:
 
 class SnapshotStore:
     def __init__(self, db_path: Path | str | None = None) -> None:
-        config.ensure_data_dir()
+        if db_path is None:
+            config.ensure_data_dir()
+        else:  # an explicit path (e.g. the portfolio command's temp store) owns only its own folder
+            Path(db_path).parent.mkdir(parents=True, exist_ok=True, mode=0o700)
         self._path = str(db_path or config.DB_PATH)
+        # Create the file 0600 before SQLite does; its -wal/-shm files inherit the mode.
+        config.write_private(Path(self._path), b"") if not Path(self._path).exists() else None
         self._conn = sqlite3.connect(self._path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._conn.executescript(_DDL)
@@ -120,6 +125,16 @@ class SnapshotStore:
             (account_ref,),
         ).fetchall()
         return [r["operation"] for r in rows]
+
+    def reassign_account(self, old_ref: str, new_ref: str) -> int:
+        """Move every snapshot from one account_ref to another (one-time migration of the
+        pre-multi-user data to the first user). Rows that would collide are dropped."""
+        with self._conn:
+            moved = self._conn.execute(
+                "UPDATE OR IGNORE snapshots SET account_ref=? WHERE account_ref=?", (new_ref, old_ref)
+            ).rowcount
+            self._conn.execute("DELETE FROM snapshots WHERE account_ref=?", (old_ref,))
+        return moved
 
     def delete_all(self) -> int:
         """Remove every snapshot (explicit teardown of captured data)."""

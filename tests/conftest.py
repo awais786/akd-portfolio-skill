@@ -1,22 +1,24 @@
 from __future__ import annotations
 
-import pytest
+import os
 
-from akd import credentials
-from akd.store import SnapshotStore
+# Never let a developer's real .env leak into tests. Must be set before `akd` is imported.
+os.environ["AKD_ENV_FILE"] = ""
+
+import pytest  # noqa: E402
+
+from akd.store import SnapshotStore  # noqa: E402
 
 
 @pytest.fixture(autouse=True)
 def isolated_data_dir(tmp_path, monkeypatch):
-    """Never touch the real ./data directory or a real saved session."""
+    """Never touch the real ./data directory."""
     from akd import config
 
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "akd.db")
     monkeypatch.delenv("AKD_PASSWORD", raising=False)
-    credentials._creds = None
     yield
-    credentials._creds = None
 
 
 @pytest.fixture

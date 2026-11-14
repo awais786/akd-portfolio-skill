@@ -164,3 +164,39 @@ def test_order_history_ids_are_stable_under_record_reordering():
 
     assert len(forward) == 3
     assert as_map(forward) == as_map(backward)
+
+
+# ---- AKD's own market rate and P/L columns ------------------------------------------------------
+_FULL_HEADER = ("Symbol;Quantity;TotalQty;Avg. BUY RATE;Sold Quantity;Avg. SELL RATE;MTM;MTM Amount;Haircut %;"
+                "Marginized Value;After Haircut;PENDING SELL;SETTLED P/L;UNSETTLED P/L")
+
+
+def test_collateral_keeps_market_rate_and_pl_columns():
+    text = _FULL_HEADER + "|OGDC;100;100;150.00;0;0;155.00;15500.00;15;127.5;12750;0;10.5;-500.25"
+    (p,) = decode_collateral(text, as_of=AS_OF)
+    assert (p.market_price, p.market_value, p.settled_pl, p.unsettled_pl) == (155.0, 15500.0, 10.5, -500.25)
+    assert p.avg_cost == 150.0 and p.quantity == 100
+
+
+def test_collateral_without_those_columns_leaves_them_none_never_zero():
+    text = "Symbol;Quantity;TotalQty;Avg. BUY RATE|OGDC;100;100;150.00"
+    (p,) = decode_collateral(text, as_of=AS_OF)
+    assert p.market_price is None and p.market_value is None and p.unsettled_pl is None
+
+
+def test_collateral_unparsable_market_rate_is_none_and_row_survives():
+    text = _FULL_HEADER + "|OGDC;100;100;150.00;0;0;n/a;;15;1;1;0;0;0"
+    (p,) = decode_collateral(text, as_of=AS_OF)
+    assert p.market_price is None and p.symbol == "OGDC" and p.avg_cost == 150.0
+
+
+def test_exposure_keeps_named_fields_and_every_other_numeric_column():
+    from akd.protocol.decode import decode_exposure
+
+    body = ("REG,Cash,Exposure;v_REG;1|"
+            "~Cash;Pending;Exposure;Outstanding Worth;Profit/Loss;Loan;Share Worth;Equity;Free Cash|"
+            "100000;2500;20000;0;-1500.5;0;250000;348500;80000")
+    out = decode_exposure(body)
+    assert out["cash_pkr"] == 100000.0 and out["equity_pkr"] == 348500.0 and out["free_cash_pkr"] == 80000.0
+    assert out["pl_pkr"] == -1500.5
+    assert out["fields"]["Pending"] == 2500.0 and out["fields"]["Loan"] == 0.0     # nothing dropped

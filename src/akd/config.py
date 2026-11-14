@@ -1,32 +1,53 @@
-"""All configuration, resolved once, from environment variables.
+"""All configuration, resolved once, from environment variables and an optional `.env` file.
 
+Precedence: real environment variables > `.env` > the defaults below.
 Nothing here is a secret. The AKD password is never read from the environment
 unless you explicitly set AKD_PASSWORD for headless use (see credentials.py).
 """
 from __future__ import annotations
 
+import contextlib
 import os
 from pathlib import Path
 
-# Where the SQLite database and the encrypted credential file live.
+
+def load_env_file(path: str | Path) -> dict[str, str]:
+    """Parse simple `KEY=VALUE` lines (comments and blanks skipped, one pair of
+    surrounding quotes stripped) and add them to `os.environ` WITHOUT overriding
+    variables that are already set. Returns what was loaded. A missing or
+    unreadable file is not an error."""
+    loaded: dict[str, str] = {}
+    try:
+        text = Path(path).expanduser().read_text()
+    except OSError:
+        return loaded
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, _, value = line.partition("=")
+        key, value = key.strip().removeprefix("export ").strip(), value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in "\"'":
+            value = value[1:-1]
+        if key and key not in os.environ:
+            os.environ[key] = loaded[key] = value
+    return loaded
+
+
+# AKD_ENV_FILE selects another file; set it to an empty string to disable .env loading.
+_env_file = os.environ.get("AKD_ENV_FILE", ".env")
+if _env_file:
+    load_env_file(_env_file)
+
+# Where the throwaway SnapshotStore would live (the portfolio command uses a temp dir instead).
 DATA_DIR = Path(os.environ.get("AKD_DATA_DIR", "data")).expanduser().resolve()
 DB_PATH = DATA_DIR / "akd.db"
-
-# One local user. The AKD wire protocol carries no account id, so every
-# snapshot is stored under this single reference.
-ACCOUNT_REF = os.environ.get("AKD_ACCOUNT_REF", "local")
-
-# Web server. Loopback by default - the app has NO login of its own.
-HOST = os.environ.get("AKD_HOST", "127.0.0.1")
-PORT = int(os.environ.get("AKD_PORT", "8080"))
 
 # AKD endpoints (from the protocol research; see docs/PROTOCOL-MAP.md).
 SOAP_URL = os.environ.get(
     "AKD_SOAP_URL",
     "http://online.akdtrade.biz/TradeCastServicev428/LoginServerService",
 )
-SOCKET_HOST = os.environ.get("AKD_SOCKET_HOST", "online.akdtrade.biz")
-SOCKET_PORT = int(os.environ.get("AKD_SOCKET_PORT", "8092"))
 SERVER_CODE = "03"  # protocol map §2
 
 # How long after AKD last confirmed a snapshot we still call the connection live.
@@ -36,5 +57,18 @@ CLOCK_SKEW_TOLERANCE_MINUTES = 5
 
 
 def ensure_data_dir() -> Path:
-    DATA_DIR.mkdir(parents=True, exist_ok=True)
+    """Create the data dir owner-only (0700): it holds financial data and secrets."""
+    DATA_DIR.mkdir(parents=True, exist_ok=True, mode=0o700)
+    with contextlib.suppress(OSError):
+        DATA_DIR.chmod(0o700)
     return DATA_DIR
+
+
+def write_private(path: Path, data: bytes) -> None:
+    """Write `data` to `path` created 0600 from the start (no window where it is
+    world-readable, unlike write-then-chmod)."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    with contextlib.suppress(OSError):
+        path.chmod(0o600)  # also tightens a file that already existed with looser bits

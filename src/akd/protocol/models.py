@@ -16,6 +16,12 @@ class AkdPosition:
     quantity: int
     avg_cost: float | None
     as_of: datetime
+    # AKD's own mark and P/L columns from GetCollateral. None when the column is absent or
+    # unparsable: never zero, which would read as "worth nothing" / "no loss".
+    market_price: float | None = None   # "MTM": AKD's current rate for the symbol
+    market_value: float | None = None   # "MTM Amount"
+    settled_pl: float | None = None     # "SETTLED P/L"
+    unsettled_pl: float | None = None   # "UNSETTLED P/L"
 
 
 # No AkdCash here. The spec listed one, but nothing decodes TradeCast's

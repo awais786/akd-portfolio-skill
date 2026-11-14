@@ -5,21 +5,17 @@ PYTHON  ?= python3
 VENV    ?= .venv
 BIN      = $(VENV)/bin
 PY       = $(BIN)/python
-PORT    ?= 8080
-HOST    ?= 127.0.0.1
-DATA    ?= data
 STAMP    = $(VENV)/.installed
 
 .DEFAULT_GOAL := help
-.PHONY: help check-python venv install run dev test test-live lint fmt check health open status \
-        logout reset-data clean distclean
+
+.PHONY: help check-python venv install portfolio test test-live lint fmt check clean distclean
 
 help: ## Show this help
-	@echo "AKD App - available commands:"
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*?## "} {printf "  make %-12s %s\n", $$1, $$2}'
+	@echo "AKD portfolio - available commands:"
+	@grep -E '^[a-zA-Z_-]+:.*?## ' Makefile | awk 'BEGIN {FS = ":.*?## "} {printf "  make %-14s %s\n", $$1, $$2}'
 	@echo ""
-	@echo "First time:  make install && make run     (then open http://$(HOST):$(PORT))"
-	@echo "Override:    make run PORT=9000 DATA=~/.akd"
+	@echo "First time:  make install, then export AKD_USER_ID and AKD_PASSWORD, then make portfolio"
 
 check-python: ## Verify Python >= 3.11 is available
 	@$(PYTHON) -c 'import sys; sys.exit(0 if sys.version_info >= (3, 11) else 1)' || \
@@ -32,19 +28,17 @@ venv: $(PY) ## Create the virtualenv (.venv)
 
 # Re-installs automatically when the requirements or pyproject change.
 $(STAMP): $(PY) requirements.txt requirements-dev.txt pyproject.toml
+	@$(PY) -m pip --version >/dev/null 2>&1 || $(PY) -m ensurepip --upgrade >/dev/null  # uv-made venvs ship without pip
 	$(PY) -m pip install --quiet --upgrade pip
 	$(PY) -m pip install --quiet -r requirements-dev.txt
 	$(PY) -m pip install --quiet -e . --no-deps
 	@touch $(STAMP)
 
 install: $(STAMP) ## Create .venv and install everything (runtime + dev)
-	@echo "Installed. Next: make run"
+	@echo "Installed. Next: export AKD_USER_ID=... AKD_PASSWORD=... then make portfolio"
 
-run: $(STAMP) ## Start the app (http://HOST:PORT)
-	AKD_HOST=$(HOST) AKD_PORT=$(PORT) AKD_DATA_DIR=$(DATA) $(PY) -m akd
-
-dev: $(STAMP) ## Start with auto-reload on code changes
-	AKD_DATA_DIR=$(DATA) $(BIN)/uvicorn akd.api:app --host $(HOST) --port $(PORT) --reload --reload-dir src
+portfolio: $(STAMP) ## Fetch the portfolio as JSON (needs AKD_USER_ID and AKD_PASSWORD in the environment). ONE login attempt
+	@$(PY) -m akd portfolio
 
 test: $(STAMP) ## Run the test suite (offline, no real credentials)
 	$(PY) -m pytest -q
@@ -61,25 +55,9 @@ fmt: $(STAMP) ## Auto-fix lint issues (imports, upgrades)
 
 check: lint test ## Lint + tests (run before committing)
 
-health: ## Ping a running server
-	@curl -fsS --max-time 5 http://$(HOST):$(PORT)/api/health && echo || { echo "Not running on $(HOST):$(PORT)"; exit 1; }
-
-status: ## Show connection status from a running server
-	@curl -fsS --max-time 5 http://$(HOST):$(PORT)/api/akd/status | $(PYTHON) -m json.tool
-
-open: ## Open the UI in your browser
-	@$(PYTHON) -m webbrowser http://$(HOST):$(PORT) >/dev/null
-
-logout: ## Forget the saved AKD login (deletes encrypted credentials; keeps captured data)
-	rm -f $(DATA)/akd_creds.enc $(DATA)/akd_creds.key
-	@echo "Saved login removed."
-
-reset-data: ## DELETE all captured data and saved login in DATA (asks first)
-	@printf "Delete everything in '$(DATA)'? [y/N] " && read a && [ "$$a" = y ] && rm -rf $(DATA) && echo "Removed $(DATA)" || echo "Cancelled"
-
 clean: ## Remove caches and build artifacts (keeps .venv and data)
 	find . -type d \( -name __pycache__ -o -name .pytest_cache -o -name .ruff_cache -o -name '*.egg-info' \) \
 	  -not -path './$(VENV)/*' -prune -exec rm -rf {} +
 
-distclean: clean ## clean + remove .venv (keeps data)
+distclean: clean ## clean + remove .venv (keeps data and .env)
 	rm -rf $(VENV)

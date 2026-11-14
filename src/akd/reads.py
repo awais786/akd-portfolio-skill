@@ -61,6 +61,30 @@ def _rows(payload: dict, key: str) -> tuple[list | None, list[str]]:
     return value, ([] if value else ["empty_book"])
 
 
+def _with_pl(p: dict) -> dict:
+    """Add cost value, market value and profit/loss to one stored position.
+
+    Every derived number is None (never 0) when an input is missing: a zero would read as
+    "no gain/loss". P/L per share = AKD's market rate - your average cost; total = per share x quantity.
+    """
+    qty, cost, mark = p.get("quantity"), p.get("avg_cost"), p.get("market_price")
+    value = p.get("market_value")
+    if value is None and mark is not None and qty is not None:
+        value = round(qty * mark, 2)
+    pl_share = round(mark - cost, 4) if mark is not None and cost is not None else None
+    pl_total = round(pl_share * qty, 2) if pl_share is not None and qty is not None else None
+    pl_pct = round(pl_share / cost * 100, 2) if pl_share is not None and cost else None
+    return {
+        **p,
+        "cost_value": round(qty * cost, 2) if cost is not None and qty is not None else None,
+        "market_price": mark,
+        "market_value": value,
+        "pl_per_share": pl_share,
+        "pl_total": pl_total,
+        "pl_pct": pl_pct,
+    }
+
+
 def holdings(store: SnapshotStore, account_ref: str) -> dict:
     snap = store.latest(account_ref, "GetCollateral")
     if snap is None:
@@ -70,18 +94,19 @@ def holdings(store: SnapshotStore, account_ref: str) -> dict:
     unreadable = "payload_unreadable" in shape
     totals = None
     if positions:
-        # Cost basis only. AKD's snapshot carries no usable current price, and
-        # this app deliberately does not mark to market (see docs/ARCHITECTURE.md).
-        rows = []
-        for p in positions:
-            cost = p.get("avg_cost")
-            rows.append({**p, "cost_value": round(p["quantity"] * cost, 2) if cost is not None else None})
+        rows = [_with_pl(p) for p in positions]
         positions = rows
-        priced = [r["cost_value"] for r in rows if r["cost_value"] is not None]
+        cost = [r["cost_value"] for r in rows if r["cost_value"] is not None]
+        marked = [r for r in rows if r["market_value"] is not None]
+        pl_rows = [r["pl_total"] for r in rows if r["pl_total"] is not None]
         totals = {
             "position_count": len(rows),
-            "total_cost_value": round(sum(priced), 2),
-            "positions_without_cost": len(rows) - len(priced),
+            "total_cost_value": round(sum(cost), 2),
+            "positions_without_cost": len(rows) - len(cost),
+            # AKD's own mark (its "MTM" rate) as of the snapshot, NOT a live PSX quote.
+            "total_market_value": round(sum(r["market_value"] for r in marked), 2) if marked else None,
+            "total_unrealised_pl": round(sum(pl_rows), 2) if pl_rows else None,
+            "positions_without_market_price": len(rows) - len(marked),
         }
     return _envelope(
         {
