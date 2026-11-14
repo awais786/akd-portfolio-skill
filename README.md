@@ -1,54 +1,62 @@
 # AKD portfolio skill
 
-A small, **read-only** tool that fetches your AKD TradeCast brokerage portfolio (holdings, cash / buying power, executed order history) as JSON, packaged as a Claude skill (`skills/akd-portfolio/`).
+A **read-only Claude skill** that fetches your AKD (PSX) brokerage portfolio, for one or more accounts, so Claude can show it and analyse it. Ask "show my AKD portfolio" and get your stocks with the ones in profit (🟢) first and the ones in loss (🔴) second.
 
-> **It reads from AKD; it cannot send orders.** Nothing in this repo sends an order to AKD.
+> **It reads from AKD; it cannot send orders.**
 > **Unofficial.** It speaks TradeCast's SOAP protocol as reverse-engineered from the client, not a supported public API. AKD can change it at any time. Read [docs/SECURITY.md](docs/SECURITY.md) before using it with a real account.
 
-## Quick start
-
-Requires **Python 3.11+** and `make`.
+## Install
 
 ```bash
-make install                                  # creates .venv and installs dependencies
-export AKD_USER_ID=COAF00000                  # your AKD account
-read -s AKD_PASSWORD && export AKD_PASSWORD   # your FULL AKD password, typed without echo
-make portfolio                                # one login attempt, then JSON on stdout
+git clone https://github.com/awais786/akd-portfolio-skill.git
+ln -s "$PWD/akd-portfolio-skill/skills/akd-portfolio" ~/.claude/skills/akd-portfolio
 ```
 
-Not using make? `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && .venv/bin/pip install -e . --no-deps && .venv/bin/python -m akd portfolio`.
+That's it: no environment to set up. The first time the skill runs it creates its own private `.venv` inside the repo (needs Python 3.11+ and an internet connection, once).
 
-More accounts: add `AKD_USER_ID_2` / `AKD_PASSWORD_2`, `_3`, and so on. Output is `{"accounts": [...]}`, one entry per account; one that fails appears as `{"account", "error", "message"}` and does not stop the others. Exit code `0` only if every account worked, else the first failure's: `2` missing credentials / invalid config, `3` login rejected, `4` AKD unreachable. With no account configured the output is a single `{"error", "message"}`.
+## Add your accounts
 
-## Use it as a Claude skill
+Create a `.env` file in the repo folder (it is git-ignored) and keep it private:
 
-`skills/akd-portfolio/SKILL.md` tells Claude when to run the command and how to read the output. Export the two variables in your own shell before starting Claude; never paste the password into the chat.
-
-## Output
-
-```
-{ "accounts": [ {
-  "account", "fetched_at",
-  "holdings": {"data": {"positions", "totals"}, "flags": [...]},
-  "cash":     {"data": {"cash": {...}},        "flags": [...]},
-  "orders":   {"data": {"orders": [...]},      "flags": [...]},
-  "poll": {...}, "last_error": ... }, ... ] }
+```bash
+cd akd-portfolio-skill
+cat > .env <<'EOF'
+AKD_USER_ID=COAF00000
+AKD_PASSWORD=your-full-akd-password
+EOF
+chmod 600 .env
 ```
 
-- **Honest "no data".** If a section could not be read, it is `null` with a `no_snapshot` flag, never `[]` or `0`: an empty list would claim "you own nothing".
-- **Prices are AKD's, as of the snapshot.** "Market price" is the rate in AKD's own `MTM` column, **not a live PSX quote**. A number is `null` when AKD didn't send its inputs.
-- **Order history is unverified.** The decoder works on real captures but has never been checked against the broker's own record of fills; the section carries `decoder_unverified`.
-- **Two timestamps.** `as_of` is when the data last *changed*; `last_confirmed_at` is when AKD last *re-sent* it.
-- **Account lockout.** Exactly one login attempt per run; a rejected login stops and is never retried. Don't script rapid reruns.
-- **The password lives in memory only** and is never written, logged or printed.
+More accounts: add `AKD_USER_ID_2` / `AKD_PASSWORD_2`, then `_3`, and so on. The password sits in plain text in that file, so keep it on a machine you trust. Claude never needs to see it: the skill reads it itself and never prints it.
+
+## Use it
+
+In Claude Code, type `/akd-portfolio` or just ask for your portfolio. Each run makes **one login attempt per account**. A wrong password costs an attempt and AKD can lock accounts after repeated failures, so check the password before running, and don't re-run in a loop.
+
+You can also run it directly: `skills/akd-portfolio/run.sh` prints the JSON below.
+
+## What you get
+
+For each account: holdings (quantity, average cost, AKD's price, value, P/L and P/L %), cash and order history, as JSON:
+
+```
+{ "accounts": [ { "account", "fetched_at",
+    "holdings": {"data": {"positions", "totals"}, "flags": [...]},
+    "cash":     {"data": {"cash": {...}},        "flags": [...]},
+    "orders":   {"data": {"orders": [...]},      "flags": [...]},
+    "poll": {...}, "last_error": ... }, ... ] }
+```
+
+An account that fails (for example a rejected login) appears as `{"account", "error", "message"}` and does not stop the others. Exit code `0` means every account worked; otherwise it is the first failure's: `2` missing credentials or bad config, `3` login rejected, `4` AKD unreachable.
+
+- **Honest "no data".** A section that could not be read is `null` with a `no_snapshot` flag, never `[]` or `0`: an empty list would claim "you own nothing".
+- **Prices are AKD's, as of the snapshot**, not live PSX quotes.
+- **Order history is unverified**, and may not load at all yet; the section carries `decoder_unverified`.
+- **The password lives in memory only** and is never written to disk by the tool, logged or printed.
 
 ## Documentation
 
-- [docs/CONFIGURATION.md](docs/CONFIGURATION.md): environment variables
-- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how the fetch works
-- [docs/STRUCTURE.md](docs/STRUCTURE.md): file layout
-- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): tests, adding a read operation
 - [docs/SECURITY.md](docs/SECURITY.md), [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md): all environment variables
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [docs/STRUCTURE.md](docs/STRUCTURE.md), [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): for contributors (tests, `make` targets)
 - [docs/PROTOCOL-MAP.md](docs/PROTOCOL-MAP.md), [docs/PROTOCOL-RESEARCH.md](docs/PROTOCOL-RESEARCH.md): the reverse-engineered protocol
-# akd-portfolio-skill
-# akd-portfolio-skill

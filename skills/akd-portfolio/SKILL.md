@@ -15,7 +15,7 @@ Run the launcher next to this file. It works from any folder and finds the repo'
 "<this skill's directory>/run.sh"
 ```
 
-(If the skill is installed as a symlink in `~/.claude/skills/`, that path is fine. If `.venv` is missing it says so: run `make install` in the `akd-app` repo.)
+(The first run creates a private `.venv` in the repo by itself, which takes a little while and needs Python 3.11+ and internet; setup messages go to stderr, so stdout stays one JSON document. If that fails, show the user the stderr message.)
 
 **Only run it when the user asks for their portfolio, and run it once.** Each run logs in once per configured account, and AKD locks accounts after repeated bad logins. Never re-run it to "double check", never loop it, and never open, print or `cat` the `.env` file.
 
