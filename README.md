@@ -1,72 +1,53 @@
-# AKD App
+# AKD portfolio skill
 
-A small, standalone, **read-only** viewer for your AKD TradeCast brokerage account: holdings, cash / buying power, and executed order history, in one web page.
+A small, **read-only** tool that fetches your AKD TradeCast brokerage portfolio (holdings, cash / buying power, executed order history) as JSON, packaged as a Claude skill (`skills/akd-portfolio/`).
 
-It was extracted from the `psx-platform` monorepo so it runs by itself: one Python package, one process, one SQLite file, one HTML page. **No Node, no Next.js, no Django, no Docker, no database server.**
-
-> **Read-only, by design.** It logs in and reads. It cannot place, modify or cancel orders. The trade-socket write path was never built.
-> **Unofficial.** It speaks TradeCast's SOAP protocol as reverse-engineered from the client, not a supported public API. AKD can change it at any time. See [docs/SECURITY.md](docs/SECURITY.md) before using it with a real account.
+> **It reads from AKD; it cannot send orders.** Nothing in this repo sends an order to AKD.
+> **Unofficial.** It speaks TradeCast's SOAP protocol as reverse-engineered from the client, not a supported public API. AKD can change it at any time. Read [docs/SECURITY.md](docs/SECURITY.md) before using it with a real account.
 
 ## Quick start
 
-Requires Python 3.11+ and [uv](https://docs.astral.sh/uv/).
+Requires **Python 3.11+** and `make`.
 
 ```bash
-cd akd-app
-uv sync                 # installs deps into .venv
-uv run akd-app          # serves http://127.0.0.1:8080
+make install                                  # creates .venv and installs dependencies
+export AKD_USER_ID=COAF00000                  # your AKD account
+read -s AKD_PASSWORD && export AKD_PASSWORD   # your FULL AKD password, typed without echo
+make portfolio                                # one login attempt, then JSON on stdout
 ```
 
-Open <http://127.0.0.1:8080>, enter your AKD account (e.g. `COAF00000`) and your **full** password, and click **Connect**. Within a few seconds the Holdings, Cash and Orders tabs fill in.
+Not using make? `python3 -m venv .venv && .venv/bin/pip install -r requirements.txt && .venv/bin/pip install -e . --no-deps && .venv/bin/python -m akd portfolio`.
 
-Change the port with `AKD_PORT=9000 uv run akd-app`. All settings: [docs/CONFIGURATION.md](docs/CONFIGURATION.md).
+More accounts: add `AKD_USER_ID_2` / `AKD_PASSWORD_2`, `_3`, and so on. Output is `{"accounts": [...]}`, one entry per account; one that fails appears as `{"account", "error", "message"}` and does not stop the others. Exit code `0` only if every account worked, else the first failure's: `2` missing credentials / invalid config, `3` login rejected, `4` AKD unreachable. With no account configured the output is a single `{"error", "message"}`.
 
-## What you get
+## Use it as a Claude skill
 
-| Tab | Source (SOAP operation) | Shows |
-|---|---|---|
-| Holdings | `GetCollateral` | symbol, quantity, average cost, cost value, totals |
-| Cash | `GetExposureDynamic` | cash, exposure used, share worth, equity, **free cash (buying power)**, P/L |
-| Orders | `GetOrderHistory` | executed fills: date, symbol, side, quantity, price (**provisional**, see below) |
-| Import | local parser | paste a TradeCast CSV / order-history export to preview how it parses (nothing stored) |
+`skills/akd-portfolio/SKILL.md` tells Claude when to run the command and how to read the output. Export the two variables in your own shell before starting Claude; never paste the password into the chat.
 
-The daemon re-polls AKD every 5 seconds while connected. A saved (encrypted) session is restored on restart.
+## Output
 
-## Things worth knowing
+```
+{ "accounts": [ {
+  "account", "fetched_at",
+  "holdings": {"data": {"positions", "totals"}, "flags": [...]},
+  "cash":     {"data": {"cash": {...}},        "flags": [...]},
+  "orders":   {"data": {"orders": [...]},      "flags": [...]},
+  "poll": {...}, "last_error": ... }, ... ] }
+```
 
-- **Honest "no data".** If nothing was ever captured, fields are `null` with a `no_snapshot` flag, never `[]` or `0`, because an empty list would claim "you own nothing".
-- **Two timestamps.** `as_of` is when the data last *changed*; `last_confirmed_at` is when AKD last *re-sent* it. Old `as_of` on a live connection just means nothing changed. "Connected" is judged from `last_confirmed_at` (live = within 15 minutes).
-- **No market prices.** Values are at **cost**, not marked to market. The original platform marked to PSX prices, which needs a PSX data source this app deliberately doesn't carry.
-- **Order history is unverified.** The decoder works on real captures but has never been checked against the broker's own record of fills. The UI and API say so.
-- **Account lockout.** Connecting makes exactly one login attempt. A rejected login stops everything and never retries. A wrong password costs one attempt, not a lockout spiral. Don't script rapid reconnects.
-- **No login on the app itself.** It binds to `127.0.0.1` only. Don't expose it. See [docs/SECURITY.md](docs/SECURITY.md).
+- **Honest "no data".** If a section could not be read, it is `null` with a `no_snapshot` flag, never `[]` or `0`: an empty list would claim "you own nothing".
+- **Prices are AKD's, as of the snapshot.** "Market price" is the rate in AKD's own `MTM` column, **not a live PSX quote**. A number is `null` when AKD didn't send its inputs.
+- **Order history is unverified.** The decoder works on real captures but has never been checked against the broker's own record of fills; the section carries `decoder_unverified`.
+- **Two timestamps.** `as_of` is when the data last *changed*; `last_confirmed_at` is when AKD last *re-sent* it.
+- **Account lockout.** Exactly one login attempt per run; a rejected login stops and is never retried. Don't script rapid reruns.
+- **The password lives in memory only** and is never written, logged or printed.
 
 ## Documentation
 
-| Doc | Contents |
-|---|---|
-| [docs/STRUCTURE.md](docs/STRUCTURE.md) | annotated file tree, layers, dependency rules |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | modules, data flow, data model, design decisions |
-| [docs/API.md](docs/API.md) | every endpoint, envelope, flags, examples |
-| [docs/CONFIGURATION.md](docs/CONFIGURATION.md) | every environment variable, files on disk |
-| [docs/SECURITY.md](docs/SECURITY.md) | credential handling, threat model, hardening |
-| [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) | login rejected, blank tabs, stale data, port in use |
-| [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md) | tests, lint, layout, how to extend |
-| [docs/EXTRACTION.md](docs/EXTRACTION.md) | what came from psx-platform, what changed, what was dropped |
-| [docs/PROTOCOL-MAP.md](docs/PROTOCOL-MAP.md), [docs/PROTOCOL-RESEARCH.md](docs/PROTOCOL-RESEARCH.md) | the reverse-engineered TradeCast protocol (original research) |
-
-## Layout
-
-```
-src/akd/
-  api.py          FastAPI app + routes, serves the UI
-  manager.py      builds/supervises the daemon; the single login attempt
-  daemon.py       SOAP login + 5s read polling (+ optional trade socket)
-  reads.py        turns stored snapshots into honest API answers
-  store.py        append-only SQLite snapshot store (two clocks)
-  credentials.py  in-memory + encrypted-on-disk login
-  parse.py        TradeCast export parsers (import preview)
-  protocol/       pure SOAP / crypto / codec / decoders
-  static/index.html   the entire UI
-tests/            98 tests, no network, no real credentials
-```
+- [docs/CONFIGURATION.md](docs/CONFIGURATION.md): environment variables
+- [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): how the fetch works
+- [docs/STRUCTURE.md](docs/STRUCTURE.md): file layout
+- [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): tests, adding a read operation
+- [docs/SECURITY.md](docs/SECURITY.md), [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md)
+- [docs/PROTOCOL-MAP.md](docs/PROTOCOL-MAP.md), [docs/PROTOCOL-RESEARCH.md](docs/PROTOCOL-RESEARCH.md): the reverse-engineered protocol
+# akd-portfolio-skill
