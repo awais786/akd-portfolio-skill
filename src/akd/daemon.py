@@ -69,11 +69,6 @@ class AkdDaemon:
         self._creds = creds or EnvCredentials()
         self._public_key = load_public_key(_KEY)
         self._authenticated = False
-        self._auth_result: dict | None = None
-        # Default to `account` (matching every soap.py builder test's own
-        # convention of user_id == account) until a real login hands us a
-        # token - never a made-up placeholder once we have the real one.
-        self._user_id = account
         self._last_error: str | None = None
 
     # -- SOAP: login + reads -------------------------------------------------
@@ -89,7 +84,6 @@ class AkdDaemon:
             # No credentials: report a clean rejection instead of crashing on a KeyError.
             parsed = {"valid": False, "token": None,
                       "raw": "no AKD credentials (set AKD_USER_ID and AKD_PASSWORD)"}
-            self._auth_result = parsed
             self._authenticated = False
             return parsed
         login_user = self._creds.login_user_id(self.account)
@@ -124,11 +118,7 @@ class AkdDaemon:
             "parsed_raw": redacted if parsed["valid"] else parsed.get("raw"),
         }
         log.info("AKD login diagnostic: %s", diag)
-        self._auth_result = parsed
         self._authenticated = parsed["valid"]
-        if parsed["valid"] and parsed.get("token"):
-            # The real post-auth session id, never a placeholder - kept as the session token.
-            self._user_id = parsed["token"]
         return parsed
 
     def _soap_account(self) -> str:

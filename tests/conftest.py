@@ -4,6 +4,8 @@ import os
 
 # Never let a developer's real .env leak into tests. Must be set before `akd` is imported.
 os.environ["AKD_ENV_FILE"] = ""
+# ...and never let a developer's own limits.env change what the tests expect (the default limits apply).
+os.environ["AKD_LIMITS_FILE"] = ""
 
 import pytest  # noqa: E402
 
@@ -18,6 +20,9 @@ def isolated_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "DATA_DIR", tmp_path)
     monkeypatch.setattr(config, "DB_PATH", tmp_path / "akd.db")
     monkeypatch.delenv("AKD_PASSWORD", raising=False)
+    from akd import tickets
+
+    monkeypatch.setattr(tickets, "DEFAULT_LIMITS_FILE", tmp_path / "no-such-limits.env")
     yield
 
 

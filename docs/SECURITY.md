@@ -8,4 +8,4 @@ This tool handles your brokerage login. Read this before pointing it at a real a
 - **One attempt.** AKD locks accounts after repeated bad logins. The command makes exactly one login attempt per run and stops on rejection. Don't loop it.
 - **Transport.** AKD's SOAP endpoint is plain HTTP; the password never crosses it in full (positional, RSA-encrypted), but treat the account data as visible to your network.
 - **Output is sensitive.** The JSON holds your positions and cash. Don't paste it where you wouldn't paste a statement.
-- **Fixtures and captures.** Never commit real account data, tokens, or `.pcap` files (they contain the trading PIN).
+- **Fixtures and captures.** Never commit real account data, tokens, or `.pcap` files (they contain the trading PIN). See `docs/CAPTURE-GUIDE.md`.

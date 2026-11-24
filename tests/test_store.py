@@ -49,9 +49,3 @@ def test_accounts_and_operations_are_isolated(store):
     store.put("u1", "GetCollateral", T0, A)
     assert store.latest("u2", "GetCollateral") is None
     assert store.operations("u1") == ["GetCollateral"]
-
-
-def test_delete_all(store):
-    store.put("u", "op", T0, A)
-    assert store.delete_all() == 1
-    assert store.latest("u", "op") is None

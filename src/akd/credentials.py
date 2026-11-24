@@ -21,7 +21,7 @@ class Creds:
 
 
 class UserCredentials:
-    """One app user's AKD login. Duck-typed provider the daemon reads: `password()` and
+    """An AKD login held in memory. Duck-typed provider the daemon reads: `password()` and
     `login_user_id(fallback)`."""
 
     def __init__(self) -> None:
@@ -30,22 +30,16 @@ class UserCredentials:
     def set(self, akd_user_id: str, password: str) -> None:
         self._creds = Creds(user_id=akd_user_id.strip(), password=password)
 
-    def clear(self) -> None:
-        self._creds = None
-
     def login_user_id(self, fallback: str) -> str:
         return self._creds.user_id if self._creds and self._creds.user_id else fallback
 
     def password(self) -> str | None:
         return self._creds.password if self._creds and self._creds.password else None
 
-    def has(self) -> bool:
-        return bool(self._creds and self._creds.password)
-
 
 class EnvCredentials:
-    """Headless fallback: the password from AKD_PASSWORD, the account as given. Used by the
-    daemon when no per-user provider is injected (tests, scripts). The web app never uses it."""
+    """Fallback: the password from AKD_PASSWORD, the account as given. Used by the daemon when no
+    provider is injected (tests, scripts)."""
 
     def login_user_id(self, fallback: str) -> str:
         return fallback

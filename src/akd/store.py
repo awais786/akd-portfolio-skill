@@ -126,21 +126,6 @@ class SnapshotStore:
         ).fetchall()
         return [r["operation"] for r in rows]
 
-    def reassign_account(self, old_ref: str, new_ref: str) -> int:
-        """Move every snapshot from one account_ref to another (one-time migration of the
-        pre-multi-user data to the first user). Rows that would collide are dropped."""
-        with self._conn:
-            moved = self._conn.execute(
-                "UPDATE OR IGNORE snapshots SET account_ref=? WHERE account_ref=?", (new_ref, old_ref)
-            ).rowcount
-            self._conn.execute("DELETE FROM snapshots WHERE account_ref=?", (old_ref,))
-        return moved
-
-    def delete_all(self) -> int:
-        """Remove every snapshot (explicit teardown of captured data)."""
-        with self._conn:
-            return self._conn.execute("DELETE FROM snapshots").rowcount
-
     @property
     def path(self) -> str:
         return self._path

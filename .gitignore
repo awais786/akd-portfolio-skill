@@ -13,3 +13,5 @@ data/
 !.env.example
 # a saved portfolio fetch holds real positions
 portfolio*.json
+# your own order limits (not secret, but personal); `limits.env.example` belongs in git
+limits.env
