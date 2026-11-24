@@ -21,7 +21,7 @@ Run the launcher next to this file. It works from any folder and finds the repo'
 
 Credentials come **only** from the environment (or the repo's git-ignored `.env`): `AKD_USER_ID` (the AKD account, e.g. `COAF00000`) and `AKD_PASSWORD` for the first account, then `AKD_USER_ID_2` / `AKD_PASSWORD_2`, `_3`, and so on for more accounts. Each account gets one login attempt per run.
 
-- If they are not set, the command exits 2 with `missing_credentials`. Tell the user to put them in the repo's `.env` file or export them in their own shell. **Never ask the user to paste the password into the chat, never write it to a file, never echo it or put it in a command line.**
+- If they are not set, the command exits 2 with `missing_credentials`. Tell the user to put them in the repo's `.env` file or export them in their own shell. **Never ask the user to paste the password into the chat, never write it to any file yourself, never echo it or put it in a command line.**
 - Exit code is 0 only if every account worked; otherwise it is the first failure's code, and the JSON still holds the accounts that did work. A failed account appears as `{"account", "error", "message"}` in its place: tell the user which one failed.
 - A rejected login exits 3 (`login_rejected`). **Stop and tell the user. Do not retry**: AKD locks accounts after repeated bad logins. One attempt per run, by design.
 - AKD unreachable exits 4 (`akd_unreachable`); it may be outside PSX trading hours. A retry later is fine.

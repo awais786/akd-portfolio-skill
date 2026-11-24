@@ -39,3 +39,17 @@ def test_example_file_is_valid_and_has_safe_defaults(tmp_path, monkeypatch):
     assert "AKD_PASSWORD" not in loaded and "AKD_USER_ID" not in loaded
     for k in loaded:
         os.environ.pop(k, None)
+
+
+def test_a_env_file_other_users_can_read_gets_a_warning_without_the_values(tmp_path, monkeypatch, capsys):
+    monkeypatch.delenv("A_ONE", raising=False)
+    f = tmp_path / ".env"
+    f.write_text("A_ONE=hunter2\n")
+    f.chmod(0o644)
+    load_env_file(f)
+    err = capsys.readouterr().err
+    assert "chmod 600" in err and "hunter2" not in err
+    f.chmod(0o600)
+    monkeypatch.delenv("A_ONE", raising=False)
+    load_env_file(f)
+    assert capsys.readouterr().err == ""
