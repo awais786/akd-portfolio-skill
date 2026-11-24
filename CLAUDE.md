@@ -14,19 +14,26 @@ make clean          # caches;  make distclean = also remove .venv
 ```
 
 - Always run code through `.venv` (the Makefile does). Never `pip install` into the system Python.
-- **Dependencies live in three files**: `pyproject.toml`, `requirements.txt`, `requirements-dev.txt`. Change all three together.
+- **Dependencies live in four files**: `pyproject.toml`, `requirements.txt`, `requirements-dev.txt`, and `requirements.lock` (exact versions + hashes used by the skill launcher; regenerate with `make lock` after any dependency change, and commit it).
 - Don't run `make test-live` or `make portfolio` unless the user supplies real credentials and asks.
 
 ## Rules that matter (do not break these)
 
-1. **Nothing is ever sent to AKD beyond the read operations.** No order entry exists. Never implement one from guesses (AKD's order message has never been observed), never store or log a PIN.
+1. **Nothing is ever sent to AKD beyond the read operations.** No order entry exists. Never implement one from guesses (AKD's order message has never been observed), never store or log a PIN. `tickets.py` only validates a suggested order (`python -m akd ticket buy|sell ...`): it has no gateway, no PIN and no network, and its output must always say `"placed": false`.
 2. **Absence is never emptiness.** No data captured -> `null` + `no_snapshot`, never `[]`/`{}`/`0`. A non-blank body that decodes to zero rows is a decode failure and must NOT be stored as an empty book. Keep `reads.py` and the daemon's poll guards consistent.
 3. **Two clocks.** `captured_at` = content last changed; `last_confirmed_at` = AKD last re-sent it. Liveness comes from `last_confirmed_at` only.
 4. **One login attempt per account per run; no retry on rejection** (a failed account never stops the next one, and a repeated account id is logged into once). AKD locks accounts. Never add retry loops or auto-reconnect around a rejected login.
-5. **The AKD password is in memory only.** Never write it to disk in any form, never log or return it, never put it in an exception, test output, or the skill text. Only 4 positional characters (RSA-encrypted) go on the wire. Credentials come from the environment, never from `.env`. The tests in `tests/test_portfolio_cli.py` scan stdout, stderr and logs for the password; keep them passing.
+5. **The tool holds the AKD password in memory only.** It never writes it anywhere, never logs or returns it, never puts it in an exception, test output, or the skill text. Only 4 positional characters (RSA-encrypted) go on the wire. Credentials come from the environment or from the user's own git-ignored `.env` (plain text on their machine, `chmod 600`; their choice, documented in README and `docs/SECURITY.md`). An assistant never reads, prints, `cat`s, copies or commits `.env`, never asks for the password in chat, and never writes it to any other file. The tests in `tests/test_portfolio_cli.py` scan stdout, stderr and logs for the password; keep them passing.
 6. **`protocol/` stays pure** (no I/O, no clock; `as_of` passed in). Decoders skip a bad row, never raise.
 7. Never log a login response when `valid` (it holds the session token). The `portfolio` command keeps the `akd` logger at WARNING so the daemon's login diagnostic (account id, password length) is not emitted.
 8. `broker_connected`-style liveness is judged from `last_confirmed_at`, not from data merely being present.
+
+## Order message research (capture tool)
+
+- `capture.py` must never print a raw value it can't classify as harmless, and must never gain a "show raw/reveal" option. Raw field values live only in `Event.fields` and are wiped once the safe text exists. Tests (`tests/test_capture.py`) assert that the PIN, account id and session token never appear in the report; keep them passing.
+- Do not read a real `.pcap` yourself or ask the user to paste one: it contains the trading PIN. Work only from the redacted report.
+- The `NEW_ORDER` message in `tests/capture_fixtures.py` is INVENTED to exercise the tool. It is not evidence about AKD's protocol.
+- It has only been tested on synthetic recordings, not yet on a real macOS `tcpdump` file (see `docs/CAPTURE-GUIDE.md`).
 
 ## Conventions
 

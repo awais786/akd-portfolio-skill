@@ -9,7 +9,7 @@ STAMP    = $(VENV)/.installed
 
 .DEFAULT_GOAL := help
 
-.PHONY: help check-python venv install portfolio test test-live lint fmt check clean distclean
+.PHONY: help check-python venv install lock portfolio test test-live lint fmt check capture-report clean distclean
 
 help: ## Show this help
 	@echo "AKD portfolio - available commands:"
@@ -37,6 +37,9 @@ $(STAMP): $(PY) requirements.txt requirements-dev.txt pyproject.toml
 install: $(STAMP) ## Create .venv and install everything (runtime + dev)
 	@echo "Installed. Next: export AKD_USER_ID=... AKD_PASSWORD=... then make portfolio"
 
+lock: ## Regenerate requirements.lock (exact versions + hashes, used by the skill launcher) from uv.lock
+	uv export --format requirements-txt --no-dev --no-emit-project --frozen -o requirements.lock
+
 portfolio: $(STAMP) ## Fetch the portfolio as JSON (needs AKD_USER_ID and AKD_PASSWORD in the environment). ONE login attempt
 	@$(PY) -m akd portfolio
 
@@ -55,9 +58,13 @@ fmt: $(STAMP) ## Auto-fix lint issues (imports, upgrades)
 
 check: lint test ## Lint + tests (run before committing)
 
-clean: ## Remove caches and build artifacts (keeps .venv and data)
+capture-report: $(STAMP) ## Decode a tcpdump recording into a REDACTED report (docs/CAPTURE-GUIDE.md). PCAP= SYMBOL= SIDE= QTY= PRICE= [ACCOUNT=]
+	@test -n "$(PCAP)" -a -n "$(SYMBOL)" -a -n "$(SIDE)" -a -n "$(QTY)" -a -n "$(PRICE)" || { echo "Usage: make capture-report PCAP=~/akd-order.pcap SYMBOL=OGDC SIDE=BUY QTY=1 PRICE=150.00 ACCOUNT=COAF00000  (see docs/CAPTURE-GUIDE.md)"; exit 1; }
+	PYTHONPATH=src $(PY) -m akd.capture report $(PCAP) --symbol $(SYMBOL) --side $(SIDE) --qty $(QTY) --price $(PRICE) $(if $(ACCOUNT),--account $(ACCOUNT))
+
+clean: ## Remove caches and build artifacts (keeps .venv)
 	find . -type d \( -name __pycache__ -o -name .pytest_cache -o -name .ruff_cache -o -name '*.egg-info' \) \
 	  -not -path './$(VENV)/*' -prune -exec rm -rf {} +
 
-distclean: clean ## clean + remove .venv (keeps data and .env)
+distclean: clean ## clean + remove .venv (keeps .env)
 	rm -rf $(VENV)

@@ -16,8 +16,12 @@ if [ ! -x .venv/bin/python ]; then
   fi
   echo "akd-portfolio: first run, setting up a private .venv (one time)..." >&2
   "$py" -m venv .venv >&2
-  .venv/bin/python -m pip install --quiet --disable-pip-version-check -r requirements.txt >&2
-  .venv/bin/python -m pip install --quiet --disable-pip-version-check -e . --no-deps >&2
+  # Exact versions with checked hashes (requirements.lock, made by `make lock`): this tool handles brokerage
+  # passwords, so nothing unpinned is installed. The project itself is not installed (no build tool is
+  # downloaded either); Python is simply pointed at src/ below.
+  .venv/bin/python -m pip install --quiet --disable-pip-version-check --require-hashes -r requirements.lock >&2
 fi
 
-exec .venv/bin/python -m akd portfolio "$@"
+# no arguments = the portfolio fetch; otherwise the first argument is the subcommand (e.g. ticket)
+if [ $# -eq 0 ]; then set -- portfolio; fi
+PYTHONPATH="$root/src" exec .venv/bin/python -m akd "$@"

@@ -1,13 +1,14 @@
 """All configuration, resolved once, from environment variables and an optional `.env` file.
 
 Precedence: real environment variables > `.env` > the defaults below.
-Nothing here is a secret. The AKD password is never read from the environment
-unless you explicitly set AKD_PASSWORD for headless use (see credentials.py).
+`.env` may hold the AKD password in plain text (see docs/SECURITY.md), so loading it warns on stderr when
+other users can read the file. The password itself is only used by credentials.py.
 """
 from __future__ import annotations
 
 import contextlib
 import os
+import sys
 from pathlib import Path
 
 
@@ -17,10 +18,15 @@ def load_env_file(path: str | Path) -> dict[str, str]:
     variables that are already set. Returns what was loaded. A missing or
     unreadable file is not an error."""
     loaded: dict[str, str] = {}
+    file = Path(path).expanduser()
     try:
-        text = Path(path).expanduser().read_text()
+        text = file.read_text()
+        group_or_world = file.stat().st_mode & 0o077
     except OSError:
         return loaded
+    if group_or_world:
+        print(f"akd: {file.name} can be read by other users; run `chmod 600 {file.name}` (it can hold your password).",
+              file=sys.stderr)
     for raw in text.splitlines():
         line = raw.strip()
         if not line or line.startswith("#") or "=" not in line:

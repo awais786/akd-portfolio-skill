@@ -102,24 +102,20 @@ def test_login_reads_password_from_env_and_never_logs_it(tmp_path, monkeypatch, 
     assert secret not in caplog.text
 
 
-def test_login_valid_sets_user_id_to_real_token_not_a_placeholder(tmp_path, monkeypatch):
+def test_reads_use_the_account_as_user_id_not_the_login_token(tmp_path, monkeypatch):
     monkeypatch.setenv("AKD_PASSWORD", "x")
     http = RoutingFakeHTTP(auth_body="<return>true|TOK-SESSION|Trader|</return>")
     d = AkdDaemon(account=ACCOUNT, store=AkdStore(tmp_path / "b.db"), http=http)
 
-    asyncio.run(d.login())
-    assert d._user_id == "TOK-SESSION"
-
-    # Reads use the ACCOUNT as UserID, not the login token: the live server
-    # rejects the token here with "Invalid Account" (the token "13DO"-style
-    # value is a trader/session code, confirmed against a captured
-    # GetExposureDynamic whose UserID is the account). The token is still kept
-    # on the session for the socket layer (asserted above).
+    assert asyncio.run(d.login())["valid"] is True
+    # Reads use the ACCOUNT as UserID, never the login token: the live server rejects the token
+    # with "Invalid Account" (confirmed against a captured GetExposureDynamic).
     asyncio.run(d.poll_once())
     assert f"<UserID>{ACCOUNT}</UserID>" in http.requests[-2]  # the GetCollateral request
+    assert "TOK-SESSION" not in "".join(http.requests[1:])
 
 
-def test_login_invalid_does_not_authenticate_and_keeps_account_as_user_id(tmp_path, monkeypatch):
+def test_login_invalid_does_not_authenticate(tmp_path, monkeypatch):
     monkeypatch.setenv("AKD_PASSWORD", "x")
     http = RoutingFakeHTTP(auth_body="<return>false|badlogin</return>")
     d = AkdDaemon(account=ACCOUNT, store=AkdStore(tmp_path / "b.db"), http=http)
@@ -127,7 +123,6 @@ def test_login_invalid_does_not_authenticate_and_keeps_account_as_user_id(tmp_pa
     result = asyncio.run(d.login())
     assert result["valid"] is False
     assert d.status()["authenticated"] is False
-    assert d._user_id == ACCOUNT  # never overwritten with an invalid/placeholder token
 
 
 # --- poll_once: absence stays absence --------------------------------------
